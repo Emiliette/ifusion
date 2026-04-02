@@ -1,18 +1,17 @@
 import math
 import os
 from functools import partial
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm.auto import tqdm
+from PIL import Image
 
 
 from .posterior_mean_variance import get_mean_processor, get_var_processor
 
 from .EM_onestep import EM_Initial,EM_onestep
+from .flex_fusion import flex_fuse_onestep
 from util.pytorch_colors import rgb_to_ycbcr, ycbcr_to_rgb
-from skimage.io import imsave
-import cv2
 __SAMPLER__ = {}
 
 def register_sampler(name: str):
@@ -170,20 +169,34 @@ class GaussianDiffusion:
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_sample_loop(self,
-                      model,
-                      x_start, 
-                      record, 
-                      I, 
-                      V,
-                      img_3, 
-                      save_root,
-                      img_index, lamb,rho):
+    def p_sample_loop(
+        self,
+        model,
+        x_start,
+        record,
+        save_root,
+        img_index,
+        lamb,
+        rho,
+        fusion_objective="edge",
+        metric_weights=None,
+        modalities=None,
+        I=None,
+        V=None,
+        img_3=None,
+    ):
         """
         The function used for sampling from noise.
         """ 
         img = x_start
         device = x_start.device
+
+        if modalities is None:
+            if I is None or V is None:
+                raise ValueError("Provide either `modalities` or both `I` and `V`.")
+            modalities = [I, V]
+            if img_3 is not None:
+                modalities.append(img_3)
 
         pbar = tqdm(list(range(self.num_timesteps))[::-1])
         for idx in pbar:
@@ -192,9 +205,22 @@ class GaussianDiffusion:
             img = img 
 
            
-            HP = EM_Initial(I) if time == torch.tensor([self.num_timesteps-1], device=device) else HP
+            HP = EM_Initial(modalities[0]) if time == torch.tensor([self.num_timesteps-1], device=device) else HP
            
-            out, HP = self.p_sample(x=img, t=time, model=model, bfHP = HP, infrared = I, visible = V, img_3 = img_3, lamb=lamb,rho=rho)
+            out, HP = self.p_sample(
+                x=img,
+                t=time,
+                model=model,
+                bfHP=HP,
+                modalities=modalities,
+                infrared=I,
+                visible=V,
+                img_3=img_3,
+                lamb=lamb,
+                rho=rho,
+                fusion_objective=fusion_objective,
+                metric_weights=metric_weights,
+            )
 
 
             img = out['sample'].detach_()
@@ -204,12 +230,13 @@ class GaussianDiffusion:
                     file_path = os.path.join(save_root, 'progress', str(img_index))
                     os.makedirs(file_path) if not os.path.exists(file_path) else file_path
 
-                    temp_img= img.detach().cpu().squeeze().numpy()
-                    temp_img=np.transpose(temp_img, (1,2,0))
-                    temp_img=cv2.cvtColor(temp_img,cv2.COLOR_RGB2YCrCb)[:,:,0]
-                    temp_img=(temp_img-np.min(temp_img))/(np.max(temp_img)-np.min(temp_img))
-                    temp_img=((temp_img)*255).astype('uint8')
-                    imsave(os.path.join(file_path, "{}.png".format(f"x_{str(idx).zfill(4)}")),temp_img)
+                    temp_img_t = img.detach().cpu()
+                    temp_y = rgb_to_ycbcr(temp_img_t)[:, 0, :, :]  # (N, H, W)
+                    temp_img = temp_y.squeeze(0).numpy()
+                    temp_img = (temp_img - np.min(temp_img)) / (np.max(temp_img) - np.min(temp_img) + 1e-12)
+                    temp_img = (temp_img * 255).astype('uint8')
+                    out_path = os.path.join(file_path, "{}.png".format(f"x_{str(idx).zfill(4)}"))
+                    Image.fromarray(temp_img, mode="L").save(out_path)
  
         return img       
         
@@ -387,7 +414,22 @@ class DDPM(SpacedDiffusion):
 
 @register_sampler(name='ddim')
 class DDIM(SpacedDiffusion):
-    def p_sample(self, model, x, t, bfHP, infrared, visible, img_3, lamb,rho,eta=0.0):
+    def p_sample(
+        self,
+        model,
+        x,
+        t,
+        bfHP,
+        modalities,
+        infrared=None,
+        visible=None,
+        img_3=None,
+        lamb=0.5,
+        rho=0.001,
+        fusion_objective="edge",
+        metric_weights=None,
+        eta=0.0,
+    ):
 
         out = self.p_mean_variance(model, x, t)
 
@@ -397,11 +439,16 @@ class DDIM(SpacedDiffusion):
         x_0_hat_y = torch.unsqueeze((x_0_hat_ycbcr[:,0,:,:]),1)
         assert x_0_hat_y.shape[1]==1
 
-        x_0_hat_y_BF, bfHP = EM_onestep(f_pre = x_0_hat_y,
-                                            I = infrared,
-                                            V = visible,
-                                            img_3 = img_3,
-                                            HyperP = bfHP,lamb=lamb,rho=rho)
+        # Flexible fusion across 2..4 modalities (real, not merged).
+        x_0_hat_y_BF, bfHP = flex_fuse_onestep(
+            f_pre=x_0_hat_y,
+            modalities=modalities,
+            state=bfHP,
+            lamb=lamb,
+            rho=rho,
+            objective=fusion_objective,
+            metric_weights=metric_weights,
+        )
 
         x_0_hat_ycbcr[:,0,:,:] = x_0_hat_y_BF
         out['pred_xstart'] = ycbcr_to_rgb(x_0_hat_ycbcr*255)

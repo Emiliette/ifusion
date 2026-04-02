@@ -50,6 +50,56 @@ python sample.py --test_folder path/to/your/dataset --save_dir path/to/output
 # Specify GPU device
 python sample.py --gpu 1
 ```
+
+## BraTS 3D -> 2D (Optional)
+
+If your BraTS dataset is in NIfTI format (`.nii` / `.nii.gz`), you can export 2D PNG slices:
+
+```bash
+python scripts/brats_3d_to_2d.py --in_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --out_root Dataset/BraTS_2D --modalities t1n t1c t2w --layout flexid
+```
+
+This creates `Dataset/BraTS_2D/vi`, `Dataset/BraTS_2D/ir`, and `Dataset/BraTS_2D/3` with aligned slice names like `BraTS-..._z042.png`.
+
+To export all 4 BraTS modalities into separate folders:
+
+```bash
+python scripts/brats_3d_to_2d.py --in_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --out_root Dataset/BraTS_2D_modalities --modalities t1n t1c t2w t2f --layout modalities
+```
+
+Then fuse 2â€“4 modalities using `sample.py` (note: if 4 are provided, the extra modalities are reduced into one slot via `--extras_reduce`):
+
+```bash
+python sample.py --test_folder Dataset/BraTS_2D_modalities --dataset_layout modalities --modalities t1n t1c t2w t2f
+```
+
+## BraTS Direct NIfTI Sampling (2â€“4 modalities)
+
+To fuse directly from `Dataset-BraTS` without exporting PNGs:
+
+```bash
+python sample_brats.py --brats_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --modalities t1n t1c t2w t2f --model_path ./weight/model.pth
+```
+
+You can choose any subset of 2/3/4 modalities by changing `--modalities`.
+
+`sample_brats.py` supports `--fusion_objective edge|metrics`. The `metrics` mode weights modalities using EN/MI/PSNR/SSIM/SD/AG heuristics (no ground-truth required).
+
+You can tune metric weights with `--w_en --w_mi --w_psnr --w_ssim --w_sd --w_ag`.
+
+### Mamba dependencies
+
+The `Vim/` folder contains source code, but `mamba_ssm` and `causal_conv1d` are still Python packages that must be installed into your environment (usually with CUDA-enabled PyTorch). If you see `ModuleNotFoundError: mamba_ssm` or `causal_conv1d`, install them first.
+
+## BraTS Unsupervised Training (2â€“4 modalities)
+
+This repo includes a lightweight train script that learns a flexible fusion model without ground-truth fused images, using differentiable approximations of EN/MI/PSNR/SSIM/SD/AG:
+
+```bash
+python train_brats.py --brats_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --out_dir checkpoints_brats --steps 20000 --batch_size 4 --min_inputs 2 --max_inputs 4
+```
+
+It writes checkpoints like `checkpoints_brats/latest.pth` and a CSV log `checkpoints_brats/train_log.csv`.
 ## 📁 Dataset Structure
 
 ### Standard Dataset Format

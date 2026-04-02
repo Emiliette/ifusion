@@ -1,6 +1,6 @@
 # Defaults for image training.
 
-image_size: 256
+image_size: 240
 num_channels: 256
 num_res_blocks: 2
 channel_mult: ""

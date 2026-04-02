@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# Env
+.env
+
+# Data / outputs
+data/
+datasets/
+outputs/
+results/
+runs/
+
+# Model weights
+weight/
+*.pth
+*.pt
+*.ckpt
+
+# Large files
+*.zip
+*.tar
+*.gz

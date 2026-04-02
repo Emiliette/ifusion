@@ -31,6 +31,27 @@ def load_yaml(file_path: str) -> dict:
     return config
 
 
+def _reduce_extras(extras, method: str):
+    if len(extras) == 0:
+        return None
+    if method == "sum":
+        out = extras[0].copy()
+        for e in extras[1:]:
+            out += e
+        return out
+    if method == "mean":
+        out = extras[0].copy()
+        for e in extras[1:]:
+            out += e
+        return out / float(len(extras))
+    if method == "max":
+        out = extras[0].copy()
+        for e in extras[1:]:
+            out = np.maximum(out, e)
+        return out
+    raise ValueError(f"Unknown extras_reduce: {method}")
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='FlexiD-Fuse Image Fusion')
@@ -45,6 +66,14 @@ if __name__ == '__main__':
     parser.add_argument('--test_folder', type=str, 
                         default='./Dataset/Medical_Image',
                         help='Path to test dataset folder')
+    parser.add_argument('--dataset_layout', type=str, default='flexid',
+                        choices=['flexid', 'modalities'],
+                        help='Dataset layout: flexid (vi/ir/3) or modalities (t1n/t1c/t2w/t2f folders)')
+    parser.add_argument('--modalities', type=str, nargs='+', default=None,
+                        help='For dataset_layout=modalities: modalities to fuse (2 to 4), e.g. t1n t1c t2w t2f')
+    parser.add_argument('--extras_reduce', type=str, default='mean',
+                        choices=['mean', 'sum', 'max'],
+                        help='If 4 modalities are provided, extra modalities are reduced into a single slot using this method')
     parser.add_argument('--scale', type=int, default=30,
                         help='Scale factor for image cropping to make it divisible')
     parser.add_argument('--seed', type=int, default=3407,
@@ -99,14 +128,40 @@ if __name__ == '__main__':
         os.makedirs(os.path.join(out_path, img_dir), exist_ok=True)
 
     i=0
-    for img_name in os.listdir(os.path.join(test_folder,"vi")):
-        inf_img = image_read(os.path.join(test_folder,"ir",img_name), mode=args.image_mode)[np.newaxis,np.newaxis, ...]/255.0 
-        vis_img = image_read(os.path.join(test_folder,"vi",img_name), mode=args.image_mode)[np.newaxis,np.newaxis, ...]/255.0 
-        # If img_3 path is empty, set img_3 to all zeros
-        if os.path.exists(os.path.join(test_folder,"3",img_name)):
-            img_3 = image_read(os.path.join(test_folder,"3",img_name), mode=args.image_mode)[np.newaxis,np.newaxis, ...]/255.0
+
+    if args.dataset_layout == 'flexid':
+        names_root = os.path.join(test_folder, "vi")
+        img_names = os.listdir(names_root)
+        modalities = None
+    else:
+        if args.modalities is None or len(args.modalities) < 2 or len(args.modalities) > 4:
+            raise ValueError("For --dataset_layout modalities, you must provide --modalities with 2 to 4 items.")
+        modalities = [m.strip() for m in args.modalities]
+        names_root = os.path.join(test_folder, modalities[0])
+        img_names = os.listdir(names_root)
+
+    for img_name in img_names:
+        if args.dataset_layout == 'flexid':
+            inf_img = image_read(os.path.join(test_folder,"ir",img_name), mode=args.image_mode)[np.newaxis,np.newaxis, ...]/255.0 
+            vis_img = image_read(os.path.join(test_folder,"vi",img_name), mode=args.image_mode)[np.newaxis,np.newaxis, ...]/255.0 
+            # If img_3 path is empty, set img_3 to all zeros
+            if os.path.exists(os.path.join(test_folder,"3",img_name)):
+                img_3 = image_read(os.path.join(test_folder,"3",img_name), mode=args.image_mode)[np.newaxis,np.newaxis, ...]/255.0
+            else:
+                img_3 = np.zeros((1,1,inf_img.shape[2],inf_img.shape[3]))
         else:
-            img_3 = np.zeros((1,1,inf_img.shape[2],inf_img.shape[3]))
+            paths = [os.path.join(test_folder, m, img_name) for m in modalities]
+            if not all(os.path.exists(p) for p in paths):
+                logger.warning(f"Skip {img_name}: missing one or more modalities.")
+                continue
+            imgs = [image_read(p, mode=args.image_mode)[np.newaxis, np.newaxis, ...]/255.0 for p in paths]
+            vis_img = imgs[0]
+            inf_img = imgs[1]
+            extras = imgs[2:]
+            if len(extras) == 0:
+                img_3 = np.zeros((1,1,inf_img.shape[2],inf_img.shape[3]))
+            else:
+                img_3 = _reduce_extras(extras, args.extras_reduce)
         # img_3 = image_read(os.path.join(test_folder,"3",img_name), mode='GRAY')[np.newaxis,np.newaxis, ...]/255.0
 
         inf_img = inf_img*2-1
