@@ -24,3 +24,6 @@ weight/
 *.gz
 
 Dataset-BraTS/
+
+Vim/
+*.csv

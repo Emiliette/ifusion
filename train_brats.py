@@ -32,6 +32,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--steps", type=int, default=20000)
+    p.add_argument("--epochs", type=float, default=0.0, help="Optional. If set > 0, train for approx this many epochs (over the dataset length). Overrides --steps.")
     p.add_argument("--log_every", type=int, default=20)
     p.add_argument("--save_every", type=int, default=500)
     p.add_argument("--out_dir", type=str, default="./checkpoints_brats/")
@@ -113,6 +114,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         collate_fn=_collate,
     )
     it = iter(loader)
+
+    steps_per_epoch = max(1, len(loader))
+    if args.epochs and float(args.epochs) > 0:
+        args.steps = int(round(float(args.epochs) * steps_per_epoch))
+    logger.info(f"Steps per epoch (approx): {steps_per_epoch} | Training steps: {int(args.steps)}")
 
     model = FlexibleFusionNet(feat_channels=int(args.feat_channels)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
@@ -211,4 +217,3 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
