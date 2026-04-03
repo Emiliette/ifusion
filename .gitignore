@@ -22,3 +22,5 @@ weight/
 *.zip
 *.tar
 *.gz
+
+Dataset-BraTS/

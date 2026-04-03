@@ -2,6 +2,7 @@ import argparse
 import csv
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -229,8 +230,14 @@ def _layout_dirs(layout: str, modalities: List[str]) -> Dict[str, str]:
     if layout == "modalities":
         return {m: m for m in modalities}
     if layout == "flexid":
-        if len(modalities) < 2 or len(modalities) > 3:
-            raise ValueError("--layout flexid requires 2 or 3 modalities.")
+        if len(modalities) > 3:
+            warnings.warn(
+                "--layout flexid only supports up to 3 slots (vi/ir/3). "
+                "Falling back to --layout modalities for 4+ modalities."
+            )
+            return {m: m for m in modalities}
+        if len(modalities) < 2:
+            raise ValueError("--layout flexid requires at least 2 modalities.")
         mapping = {modalities[0]: "vi", modalities[1]: "ir"}
         if len(modalities) == 3:
             mapping[modalities[2]] = "3"
