@@ -136,6 +136,10 @@ class BraTSSliceDataset(Dataset):
         scale: int = 30,
         limit_cases: int = 0,
         seed: int = 3407,
+        shuffle_cases: bool = True,
+        deterministic: bool = False,
+        length: Optional[int] = None,
+        slices_per_case: int = 1,
     ):
         self.axis = axis
         self.slice_mode = slice_mode
@@ -143,11 +147,15 @@ class BraTSSliceDataset(Dataset):
         self.p_low = float(p_low)
         self.p_high = float(p_high)
         self.scale = int(scale)
+        self.seed = int(seed)
+        self.deterministic = bool(deterministic)
+        self.length = int(length) if length is not None else None
+        self.slices_per_case = max(1, int(slices_per_case))
         self.modalities = [m.strip().lower() for m in modalities]
         if set(self.modalities) != {"t1n", "t1c", "t2w", "t2f"}:
             raise ValueError("BraTSSliceDataset currently expects modalities = t1n t1c t2w t2f (all four).")
 
-        rng = random.Random(int(seed))
+        rng = random.Random(self.seed)
         cases = discover_brats_cases(brats_root)
         case_ids = sorted(cases.keys())
         if limit_cases and limit_cases > 0:
@@ -158,17 +166,25 @@ class BraTSSliceDataset(Dataset):
             c = cases[cid]
             if all(m in c.paths for m in self.modalities):
                 kept.append(c)
-        rng.shuffle(kept)
+        if shuffle_cases:
+            rng.shuffle(kept)
         self.cases = kept
         if not self.cases:
             raise RuntimeError("No BraTS cases found with all 4 modalities present.")
 
     def __len__(self) -> int:
+        if self.length is not None:
+            return self.length
+        if self.deterministic:
+            return len(self.cases) * self.slices_per_case
         # Infinite-ish sampling by reusing cases; length is arbitrary but stable.
         return max(1024, len(self.cases) * 16)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, str, int]:
-        case = self.cases[idx % len(self.cases)]
+        if self.deterministic:
+            case = self.cases[(idx // self.slices_per_case) % len(self.cases)]
+        else:
+            case = self.cases[idx % len(self.cases)]
 
         vols01: Dict[str, np.ndarray] = {}
         for m in self.modalities:
@@ -189,7 +205,11 @@ class BraTSSliceDataset(Dataset):
         if not slice_indices:
             # fallback
             slice_indices = [ref_vol.shape[2] // 2]
-        z = int(slice_indices[random.randint(0, len(slice_indices) - 1)])
+        if self.deterministic:
+            local_rng = random.Random(self.seed + int(idx))
+            z = int(slice_indices[local_rng.randint(0, len(slice_indices) - 1)])
+        else:
+            z = int(slice_indices[random.randint(0, len(slice_indices) - 1)])
 
         slicer = AXIS_TO_SLICE[self.axis]
         slices = []
@@ -203,4 +223,3 @@ class BraTSSliceDataset(Dataset):
         x = np.stack([s[:h, :w] for s in slices], axis=0)  # (4,H,W)
         x_t = torch.from_numpy(x).float().unsqueeze(1)  # (4,1,H,W)
         return x_t, case.case_id, z
-

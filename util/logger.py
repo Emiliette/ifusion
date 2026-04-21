@@ -1,12 +1,16 @@
 import logging
 
-def get_logger():
-    logger = logging.getLogger(name='DPS')
+
+def get_logger() -> logging.Logger:
+    logger = logging.getLogger("DPS")
+    if logger.handlers:
+        return logger
+
     logger.setLevel(logging.INFO)
-    
-    formatter = logging.Formatter("%(asctime)s [%(name)s] >> %(message)s")
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
-    
+    logger.propagate = False
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] >> %(message)s"))
+    logger.addHandler(handler)
     return logger
+
