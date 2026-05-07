@@ -26,4 +26,5 @@ weight/
 Dataset-BraTS/
 
 Vim/
-*.csv
+*.csv_tmp_fused_small/
+results_brats/

@@ -12,8 +12,6 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from util.brats_dataset import AXIS_TO_SLICE, discover_brats_cases, _load_nii
-
 
 _FUSED_RE = re.compile(r"^(?P<case>.+)_z(?P<z>\d+)\.png$")
 
@@ -226,6 +224,9 @@ def build_bbox_manifest(
     """
     Creates a CSV mapping fused slice PNGs to bbox targets derived from BraTS seg labels.
     """
+    # Heavy NIfTI dependency is imported lazily so bbox training/eval can run in 2D-only setups.
+    from util.brats_dataset import AXIS_TO_SLICE, discover_brats_cases, _load_nii  # noqa: WPS433
+
     axis = axis.lower()
     if axis not in AXIS_TO_SLICE:
         raise ValueError(f"Unknown axis: {axis}")
@@ -300,3 +301,69 @@ def build_bbox_manifest(
             wrote += 1
     return wrote
 
+
+def build_bbox_manifest_from_seg_png(*, fused_dir: str, seg_dir: str, out_csv: str) -> int:
+    """
+    Builds bbox manifest CSV from fused PNG slices + seg PNG slices.
+
+    Expected:
+      fused_dir/<case>_z###.png
+      seg_dir/<case>_z###.png
+    """
+    fused_paths: List[str] = []
+    for name in os.listdir(fused_dir):
+        if name.lower().endswith(".png"):
+            fused_paths.append(os.path.join(fused_dir, name))
+    fused_paths.sort()
+
+    os.makedirs(os.path.dirname(out_csv) or ".", exist_ok=True)
+    wrote = 0
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["fused_relpath", "case_id", "z", "has_tumor", "x0", "y0", "x1", "y1"],
+        )
+        writer.writeheader()
+
+        for fp in fused_paths:
+            name = os.path.basename(fp)
+            case_id, z = parse_fused_slice_name(name)
+            seg_path = os.path.join(seg_dir, name)
+            if not os.path.exists(seg_path):
+                continue
+
+            img = Image.open(fp).convert("L")
+            w, h = img.size
+            seg_u8 = np.array(Image.open(seg_path).convert("L"), dtype=np.uint8)
+            if seg_u8.shape[0] < h or seg_u8.shape[1] < w:
+                raise RuntimeError(f"Seg slice smaller than fused image for {name}: seg={seg_u8.shape}, img={(h,w)}")
+            seg_sl = np.ascontiguousarray(seg_u8[:h, :w])
+
+            bb_px = bbox_xyxy_from_mask(seg_sl)
+            if bb_px is None:
+                row = {
+                    "fused_relpath": os.path.relpath(fp, fused_dir).replace("\\", "/"),
+                    "case_id": case_id,
+                    "z": int(z),
+                    "has_tumor": 0,
+                    "x0": 0.0,
+                    "y0": 0.0,
+                    "x1": 0.0,
+                    "y1": 0.0,
+                }
+            else:
+                x0, y0, x1, y1 = bb_px
+                x0n, y0n, x1n, y1n = xyxy_px_to_norm(x0, y0, x1, y1, w=w, h=h)
+                row = {
+                    "fused_relpath": os.path.relpath(fp, fused_dir).replace("\\", "/"),
+                    "case_id": case_id,
+                    "z": int(z),
+                    "has_tumor": 1,
+                    "x0": float(x0n),
+                    "y0": float(y0n),
+                    "x1": float(x1n),
+                    "y1": float(y1n),
+                }
+            writer.writerow(row)
+            wrote += 1
+    return wrote

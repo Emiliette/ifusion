@@ -163,8 +163,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--modalities",
         type=str,
         nargs="+",
-        default=["t1n", "t1c", "t2w", "t2f"],
-        help="Modalities to export (choose among: t1n t1c t2w t2f seg).",
+        default=["t1n", "t1c", "t2w", "t2f", "seg"],
+        help="Modalities to export (choose among: t1n t1c t2w t2f seg). Include seg to export label masks.",
     )
     parser.add_argument(
         "--axis",
