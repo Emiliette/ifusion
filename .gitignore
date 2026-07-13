@@ -4,13 +4,10 @@ __pycache__/
 
 # Env
 .env
+.agents/
 
 # Data / outputs
-data/
-datasets/
-outputs/
-results/
-runs/
+Dataset-BraTS-2D/
 
 # Model weights
 weight/
@@ -23,9 +20,8 @@ weight/
 *.tar
 *.gz
 
-Dataset-BraTS/
+test/
 
-Vim/
-*.csv_tmp_fused_small/
-results_brats/
-eval/*_allmods.csv
+eval/
+
+
