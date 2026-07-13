@@ -30,7 +30,6 @@ FlexiD-Fuse/
 |-- eval/                           # Fusion evaluation scripts and metric CSV files
 |-- Dataset-BraTS-2D/               # Sample 2D modality/fusion/detection outputs
 |-- test/                           # Sample inference outputs
-data preparation
 |-- brats_3d_to_2d.py               # BraTS 3D NIfTI to aligned 2D PNG converter
 |-- train_brats_6.py                # Flexible modality fusion training
 |-- train_densenet121_yolov8x.py    # DenseNet121 + YOLOv8x training pipeline
