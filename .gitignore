@@ -28,3 +28,4 @@ Dataset-BraTS/
 Vim/
 *.csv_tmp_fused_small/
 results_brats/
+eval/*_allmods.csv

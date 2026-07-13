@@ -70,6 +70,31 @@ def normalize1_u8(data: np.ndarray) -> np.ndarray:
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
+def entropy_u8(img_u8: np.ndarray) -> float:
+    """Shannon entropy in bits for uint8 image, MATLAB `entropy` style."""
+    img_u8 = np.asarray(img_u8, dtype=np.uint8)
+    hist = np.bincount(img_u8.reshape(-1), minlength=256).astype(np.float64)
+    p = hist / (hist.sum() + EPS)
+    p = p[p > 0]
+    return float(-(p * np.log2(p + EPS)).sum())
+
+
+def std_u8(img_u8: np.ndarray) -> float:
+    """Standard deviation for uint8 image, close to MATLAB `std2`."""
+    return float(np.std(np.asarray(img_u8, dtype=np.float64)))
+
+
+def avg_gradient_u8(img_u8: np.ndarray) -> float:
+    """Average gradient, matching the common MATLAB image-fusion definition."""
+    img = np.asarray(img_u8, dtype=np.float64)
+    if img.ndim != 2 or img.shape[0] < 2 or img.shape[1] < 2:
+        return 0.0
+    dx = img[:-1, 1:] - img[:-1, :-1]
+    dy = img[1:, :-1] - img[:-1, :-1]
+    g = np.sqrt((dx * dx + dy * dy) / 2.0)
+    return float(np.mean(g))
+
+
 def mutual_information_u8(x_u8: np.ndarray, y_u8: np.ndarray, bins: int = 256, normalize_log_base: int = 256) -> float:
     """Mutual information between two uint8 images.
 
@@ -157,6 +182,14 @@ def psnr01(x01: np.ndarray, y01: np.ndarray) -> float:
     return float(10.0 * np.log10(1.0 / (mse + EPS)))
 
 
+def psnr_u8(x_u8: np.ndarray, y_u8: np.ndarray) -> float:
+    """PSNR on uint8 images, consistent with MATLAB `psnr` default range 255."""
+    x = np.asarray(x_u8, dtype=np.float64)
+    y = np.asarray(y_u8, dtype=np.float64)
+    mse = float(np.mean((x - y) ** 2))
+    return float(10.0 * np.log10((255.0 * 255.0) / (mse + EPS)))
+
+
 def _ssim_map_and_vars(
     x: np.ndarray,
     y: np.ndarray,
@@ -231,6 +264,21 @@ def q_s_piella(sources01: Sequence[np.ndarray], fused01: np.ndarray) -> float:
         return float(np.mean(q_map))
     cw = cw / (cw_sum + EPS)
     return float(np.sum(cw * q_map))
+
+
+def ssim_u8(x_u8: np.ndarray, y_u8: np.ndarray) -> float:
+    """SSIM on uint8 images using the MATLAB-like Gaussian-window implementation."""
+    x01 = np.asarray(x_u8, dtype=np.float64) / 255.0
+    y01 = np.asarray(y_u8, dtype=np.float64) / 255.0
+    value, _, _, _ = _ssim_map_and_vars(x01, y01, sigma=1.5, data_range=1.0)
+    return float(value)
+
+
+def vifp_u8(x_u8: np.ndarray, y_u8: np.ndarray, *, sigma_nsq: float = 2.0) -> float:
+    """VIFp on uint8 images after MATLAB-style scaling to [0,1]."""
+    x01 = np.asarray(x_u8, dtype=np.float64) / 255.0
+    y01 = np.asarray(y_u8, dtype=np.float64) / 255.0
+    return vifp(x01, y01, sigma_nsq=sigma_nsq)
 
 
 def q_cv_chen_varshney(sources01: Sequence[np.ndarray], fused01: np.ndarray, *, window_size: int = 16, alpha: int = 5) -> float:

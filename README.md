@@ -1,155 +1,188 @@
-# FlexiD-Fuse<br>
-## [ESWA25] FlexiD-Fuse: Flexible number of inputs multi-modal medical image fusion based on diffusion model
-> **Abstract:**  Different modalities of medical images provide unique physiological and anatomical information for diseases. Multi-modal medical image fusion integrates useful information from different complementary medical images with different modalities, producing a fused image that comprehensively and objectively reflects lesion characteristics to assist doctors in clinical diagnosis. However, existing fusion methods can only handle a fixed number of modality inputs, such as accepting only two-modal or tri-modal inputs, and cannot directly process varying input quantities, which hinders their application in clinical settings. To tackle this issue, we introduce FlexiD-Fuse, a diffusion-based image fusion network designed to accommodate flexible quantities of input modalities. It can end-to-end process two-modal and tri-modal medical image fusion under the same weight. FlexiD-Fuse transforms the diffusion fusion problem, which supports only fixed-condition inputs, into a maximum likelihood estimation problem based on the diffusion process and hierarchical Bayesian modeling. By incorporating the Expectation-Maximization algorithm into the diffusion sampling iteration process, FlexiD-Fuse can generate high-quality fused images with cross-modal information from source images, independently of the number of input images. We compared the latest two-modal and tri-modal medical image fusion methods, tested them on Harvard datasets, and evaluated them using nine popular metrics. The experimental results show that our method achieves the best performance in medical image fusion with varying inputs. Meanwhile, we conducted extensive extension experiments on infrared and visible image fusion, multi-exposure image fusion, and multi-focus image fusion tasks with arbitrary numbers, and compared them with the perspective state-of-the-art (SOTA) methods. The results of the extension experiments consistently demonstrate the effectiveness and superiority of our method.
+# Brain Cancer Detection on Fused Medical Images
 
-[Yushen Xu](https://scholar.google.com.hk/citations?user=NnD7vQYAAAAJ&hl=zh-CN), [Xiaosong Li](https://www.fosu.edu.cn/spoe/yanjiu/ssds/gxgc/11653.html)\*, [Yuchun Wang](https://scholar.google.com/citations?view_op=list_works&hl=zh-CN&user=xB57YWYAAAAJ), [Xiaoqi Cheng](https://www.fosu.edu.cn/mee/teachers/teachers-jxdzgcx/20469.html), [Huafeng Li](https://lhf12278.github.io/)
+This repository contains the implementation used for the bachelor thesis **"Brain Cancer Detection on Fused Medical Images"**. The project studies flexible multimodal MRI fusion for brain tumor analysis, then uses the generated fused images for tumor classification and localization.
 
-[![arxiv](https://img.shields.io/badge/Arxiv-2509.09456-red)](https://arxiv.org/abs/2509.09456) [![Elsevier](https://img.shields.io/badge/Elsevier-ESWA-FF6C00)](https://www.sciencedirect.com/science/article/abs/pii/S0957417425025126)
+The pipeline is built around the BraTS 2024 Challenge MRI modalities:
 
+- `t1n`: T1 native
+- `t1c`: T1 contrast-enhanced
+- `t2w`: T2-weighted
+- `t2f`: T2 FLAIR
 
+The fusion model accepts any available subset of 2 to 4 modalities, which makes the pipeline usable when one or more MRI sequences are missing.
 
-<p align="center">
-  <img src="assert/Fig1.png" alt="Framework" width="80%" height="auto" />
-</p>
+## Pipeline
 
-## 📋 Table of Contents
+1. Convert BraTS 2024 3D NIfTI volumes into aligned 2D PNG slices.
+2. Train a Flexible Modality Fusion Network on random modality subsets.
+3. Generate fused 2D images from available MRI modalities.
+4. Train DenseNet121 for tumor/no-tumor slice classification.
+5. Train a YOLO detector for tumor bounding-box localization.
+6. Run end-to-end inference: fusion, classification, and detection.
 
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Dataset Structure](#dataset-structure)
-- [Citation](#citation)
+## Repository Structure
 
-## 🛠 Installation
+```text
+FlexiD-Fuse/
+|-- configs/                        # Diffusion/model configuration files
+|-- guided_diffusion/               # Fusion backbone, attention, Mamba, and EM modules
+|-- util/                           # Datasets, losses, metrics, models, and bbox helpers
+|-- eval/                           # Fusion evaluation scripts and metric CSV files
+|-- Dataset-BraTS-2D/               # Sample 2D modality/fusion/detection outputs
+|-- test/                           # Sample inference outputs
+data preparation
+|-- brats_3d_to_2d.py               # BraTS 3D NIfTI to aligned 2D PNG converter
+|-- train_brats_6.py                # Flexible modality fusion training
+|-- train_densenet121_yolov8x.py    # DenseNet121 + YOLOv8x training pipeline
+|-- infer_fusion_detect_2d.py       # End-to-end fusion/classification/detection inference
+|-- best_fusion.pt                  # Sample fusion checkpoint
+|-- best_densenet121.pth            # Sample DenseNet121 checkpoint
+|-- best.pt                         # Sample YOLO checkpoint
+`-- README.md
+```
 
-### Prerequisites
+## Installation
 
-- Python 3.8+
-- CUDA-compatible GPU (recommended)
-- PyTorch 1.8+
-
-### Environment Setup
+Python 3.8+ and a CUDA-capable GPU are recommended for training.
 
 ```bash
-# Create virtual environment
 conda create -n flexid-fuse python=3.8
 conda activate flexid-fuse
-
-# Install dependencies
 pip install -r requirements.txt
+pip install ultralytics
 ```
 
-## 🚀 Quick Start
+If Mamba-related imports fail, install `mamba_ssm` and `causal_conv1d` versions compatible with the local PyTorch and CUDA environment.
+
+## Data Preparation
+
+The thesis uses the BraTS 2024 Challenge dataset. Each case contains four MRI sequences and a segmentation mask. The 3D NIfTI volumes are converted to 2D PNG slices before training.
 
 ```bash
-# Run with custom weight
-python sample.py --model_path ./weight/model.pth
-
-# Run with custom dataset
-python sample.py --test_folder path/to/your/dataset --save_dir path/to/output
-
-# Specify GPU device
-python sample.py --gpu 1
+python brats_3d_to_2d.py ^
+  --in_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData ^
+  --out_root Dataset/BraTS_2D_Training ^
+  --modalities t1n t1c t2w t2f seg ^
+  --layout modalities ^
+  --slice_mode nonzero
 ```
 
-## BraTS 3D -> 2D (Optional)
+Expected output layout:
 
-If your BraTS dataset is in NIfTI format (`.nii` / `.nii.gz`), you can export 2D PNG slices:
+```text
+Dataset/BraTS_2D_Training/
+|-- t1n/
+|-- t1c/
+|-- t2w/
+|-- t2f/
+|-- seg/
+`-- manifest.csv
+```
+
+There are 716,468 training slices and 142,756 validation slices after conversion, with equal slice counts for `t1n`, `t1c`, `t2w`, and `t2f`.
+
+## Train the Fusion Model
+
+`train_brats_6.py` trains a Flexible Modality Fusion Network with:
+
+- shared CNN encoder
+- modality embedding and feature modulation
+- attention weight estimation and weighted feature fusion
+- decoder producing a normalized single-channel fused image
+- optional EM-like refinement with 3 or 5 iterations
 
 ```bash
-python scripts/brats_3d_to_2d.py --in_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --out_root Dataset/BraTS_2D --modalities t1n t1c t2w --layout flexid
+python train_brats_6.py ^
+  --train_2d_root Dataset/BraTS_2D_Training ^
+  --val_2d_root Dataset/BraTS_2D_Validation ^
+  --modalities t1n t1c t2w t2f ^
+  --out_dir checkpoints_brats_6_26 ^
+  --epochs 100 ^
+  --batch_size 16 ^
+  --lr 2e-4 ^
+  --em_steps 0
 ```
 
-This creates `Dataset/BraTS_2D/vi`, `Dataset/BraTS_2D/ir`, and `Dataset/BraTS_2D/3` with aligned slice names like `BraTS-..._z042.png`.
+Main outputs:
 
-To export all 4 BraTS modalities into separate folders:
+- `checkpoints_brats_6_26/last.pt`
+- `checkpoints_brats_6_26/best_26.pt`
+- `checkpoints_brats_6_26/train_log.csv`
+- `checkpoints_brats_6_26/val_log.csv`
+
+Use `--em_steps 3` or `--em_steps 5` to evaluate the optional EM-like refinement. In the thesis experiments, the model without EM-like refinement gives the best overall fusion quality across most metrics.
+
+## Train DenseNet121 and YOLO
+
+The detection stage uses fused images generated by the No-EM fusion model. DenseNet121 performs tumor/no-tumor classification, and YOLOv8x localizes tumor regions using bounding boxes converted from BraTS segmentation masks.
 
 ```bash
-python scripts/brats_3d_to_2d.py --in_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --out_root Dataset/BraTS_2D_modalities --modalities t1n t1c t2w t2f --layout modalities
+python train_densenet121_yolov8x.py ^
+  --train_fused_dir path/to/train/fused ^
+  --train_mask_dir path/to/train/mask ^
+  --val_fused_dir path/to/val/fused ^
+  --val_mask_dir path/to/val/mask ^
+  --out_dir runs_fused_brats ^
+  --epochs 100 ^
+  --yolo_epochs 100
 ```
 
-Then fuse 2â€“4 modalities using `sample.py` (note: if 4 are provided, the extra modalities are reduced into one slot via `--extras_reduce`):
+Main outputs:
+
+- `runs_fused_brats/classification/best_densenet121.pth`
+- `runs_fused_brats/classification/latest_densenet121.pth`
+- `runs_fused_brats/classification/densenet121_log.csv`
+- `runs_fused_brats/prepared_yolo/data.yaml`
+- `runs_fused_brats/detection/yolov8x/weights/best.pt`
+
+To only prepare YOLO labels and dataset folders:
 
 ```bash
-python sample.py --test_folder Dataset/BraTS_2D_modalities --dataset_layout modalities --modalities t1n t1c t2w t2f
+python train_densenet121_yolov8x.py ^
+  --train_fused_dir path/to/train/fused ^
+  --train_mask_dir path/to/train/mask ^
+  --val_fused_dir path/to/val/fused ^
+  --val_mask_dir path/to/val/mask ^
+  --out_dir runs_fused_brats ^
+  --prepare_only
 ```
 
-## BraTS Direct NIfTI Sampling (2â€“4 modalities)
+Useful options:
 
-To fuse directly from `Dataset-BraTS` without exporting PNGs:
+- `--prepare_only`: only build YOLO labels and dataset folders.
+- `--skip_cls`: skip DenseNet121 training.
+- `--skip_yolo`: skip YOLOv8x training.
+- `--resume`: resume DenseNet121 and YOLOv8x from latest checkpoints when available.
 
-```bash
-python sample_brats.py --brats_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --modalities t1n t1c t2w t2f --model_path ./weight/model.pth
-```
+## Evaluation Results Reported in the Thesis
 
-You can choose any subset of 2/3/4 modalities by changing `--modalities`.
+Fusion quality is evaluated with EN, SD, AG, MI, PSNR, SSIM, VIF, FSIM, QNCIE, QS, and QCV. The No-EM model preserves the best overall image quality across most quantitative metrics. EM-3 can increase sharpness, while EM-5 tends to over-adjust intensity and reduce information preservation.
 
-`sample_brats.py` supports `--fusion_objective edge|metrics`. The `metrics` mode weights modalities using EN/MI/PSNR/SSIM/SD/AG heuristics (no ground-truth required).
+Classification on No-EM fused images with DenseNet121:
 
-You can tune metric weights with `--w_en --w_mi --w_psnr --w_ssim --w_sd --w_ag`.
+| Metric | Value |
+| --- | ---: |
+| Validation loss | 1.4064 |
+| Accuracy | 85.42% |
+| Precision | 82.75% |
+| Recall | 85.24% |
+| F1-score | 83.98% |
 
-### Mamba dependencies
+Detection on No-EM fused images:
 
-The `Vim/` folder contains source code, but `mamba_ssm` and `causal_conv1d` are still Python packages that must be installed into your environment (usually with CUDA-enabled PyTorch). If you see `ModuleNotFoundError: mamba_ssm` or `causal_conv1d`, install them first.
+| Metric | Value |
+| --- | ---: |
+| Validation box loss | 1.4417 |
+| Validation classification loss | 2.2440 |
+| Validation DFL loss | 1.4330 |
+| Precision | 79.66% |
+| Recall | 57.19% |
+| mAP@0.5 | 63.29% |
+| mAP@0.5:0.95 | 37.29% |
 
-## BraTS Unsupervised Training (2â€“4 modalities)
+## Notes
 
-This repo includes a lightweight train script that learns a flexible fusion model without ground-truth fused images, using differentiable approximations of EN/MI/PSNR/SSIM/SD/AG:
-
-```bash
-python train_brats.py --brats_root Dataset-BraTS/BraTS2024-BraTS-GLI-TrainingData --out_dir checkpoints_brats --steps 20000 --batch_size 4 --min_inputs 2 --max_inputs 4
-```
-
-It writes checkpoints like `checkpoints_brats/latest.pth` and a CSV log `checkpoints_brats/train_log.csv`.
-## 📁 Dataset Structure
-
-### Standard Dataset Format
-
-```
-Dataset/
-├── vi/           # Visible images
-│   ├── image1.png
-│   ├── image2.png
-│   └── ...
-├── ir/           # Infrared images
-│   ├── image1.png
-│   ├── image2.png
-│   └── ...
-└── 3/            # Third modality (optional)
-    ├── image1.png
-    ├── image2.png
-    └── ...
-```
-
-### Medical Image Dataset Format
-
-For medical imaging (T1, T1CE, T2):
-
-```
-Dataset/
-├── vi/           # T1 images
-├── ir/           # T1CE images  
-└── 3/            # T2 images (optional)
-```
-
-# 📄 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@article{XU2026128895,
-title = {FlexiD-Fuse: Flexible number of inputs multi-modal medical image fusion based on diffusion model},
-journal = {Expert Systems with Applications},
-volume = {296},
-pages = {128895},
-year = {2026},
-issn = {0957-4174},
-doi = {https://doi.org/10.1016/j.eswa.2025.128895},
-url = {https://www.sciencedirect.com/science/article/pii/S0957417425025126},
-author = {Yushen Xu and Xiaosong Li and Yuchun Wang and Xiaoqi Cheng and Huafeng Li and Haishu Tan},
-}
-```
-
-
-
-
-
+- Fusion training expects aligned modality folders with matching filenames.
+- Detection training expects fused PNG images and segmentation-mask PNGs.
+- Any mask with positive pixels is treated as tumor-positive for classification.
+- YOLO labels are generated from the bounding box enclosing the positive mask region.
